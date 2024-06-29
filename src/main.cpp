@@ -32,11 +32,17 @@ struct ProgramState {
     Particle* particles;
 
     float kernelCutoff;
-    float kernelCutoffSquared;
 
     float EOSCoefficient;
     float EOSExponent;
     float EOSRestDensity;
+
+    float viscosityCoefficient;
+
+    float gravitationalPull;
+
+    float wallPushCutoff;
+    float wallPushStrength;
 };
 
 void render(ProgramState* state);
@@ -45,34 +51,43 @@ void displayGui(ProgramState* state);
 void initializeParticles(ProgramState* state);
 void updateParticles(ProgramState* state);
 void integrateParticles(ProgramState* state);
-void applyBoundaryConditions(ProgramState* state);
 void resetParticleForces(ProgramState* state);
 
+void applyBoundaryConditions(ProgramState* state);
+void applyWallForces(ProgramState* state);
+
 void computeDensities(ProgramState* state);
-float SPHDensity(sf::Vector2f position, Particle* particles, int particleAmount, float cutoff, float cutoffSquared);
+float SPHDensity(sf::Vector2f position, Particle* particles, int particleAmount, float cutoff);
 
 void computePressures(ProgramState* state);
 float EOSPressure(float density, float restDensity, float k, float gamma);
 
 void applyPressureForces(ProgramState* state);
-sf::Vector2f calculatePressureForce(int particleIndex, Particle *particles, int particleAmount, float cutoffSquared);
+void calculatePressureForce(int particleIndex, Particle* particles, int particleAmount, float cutoff);
 
-float SPHKernel(float distanceSquared, float cutoffSquared);
-sf::Vector2f SPHKernelGradient(sf::Vector2f iPosition, sf::Vector2f jPosition, float cutoffSquared);
+void applyViscosityForces(ProgramState* state);
+void calculateViscosityForce(int particleIndex, Particle* particles, int particleAmount, float cutoff, float viscosityCoefficient);
+
+float SPHKernel(float distance, float cutoff);
+sf::Vector2f SPHKernelGradient(sf::Vector2f iPosition, sf::Vector2f jPosition, float cutoff);
+float SPHKernelLaplacian(float distance, float cutoff);
 
 float randomFloat(float lowerBound, float upperBound); // From ChatGPT
 
 int main() {
     ProgramState state = {
-        .width = 1200,
-        .height = 800,
-        .particleAmount = 500,
+        .width = 400,
+        .height = 300,
+        .particleAmount = 200,
         .kernelCutoff = 100.0f,
-        .EOSCoefficient = 20.0f,
-        .EOSExponent = 7.0f,
-        .EOSRestDensity = 5.0f
+        .EOSCoefficient = 100000.0f,
+        .EOSExponent = 1.0f,
+        .EOSRestDensity = 3.0f,
+        .viscosityCoefficient = 500.0f,
+        .gravitationalPull = 100.0f,
+        .wallPushCutoff = 30.0f,
+        .wallPushStrength = 300.0f
     };
-    state.kernelCutoffSquared = state.kernelCutoff * state.kernelCutoff;
     state.particles = new Particle[state.particleAmount];
 
     initializeParticles(&state);
@@ -126,7 +141,7 @@ void render(ProgramState *state) {
 
 void displayGui(ProgramState *state) {
     sf::Time deltaTime = state->deltaClock->getElapsedTime();
-    state->deltaTime = deltaTime.asSeconds();
+    state->deltaTime = 0.01f;//deltaTime.asSeconds();
     ImGui::SFML::Update(*state->window, state->deltaClock->restart());
 
     ImGui::Begin("SPH Configuration");
@@ -136,13 +151,20 @@ void displayGui(ProgramState *state) {
     ImGui::NewLine();
     ImGui::Text("Kernel");
     ImGui::InputFloat("Cutoff Distance", &state->kernelCutoff);
-    state->kernelCutoffSquared = state->kernelCutoff * state->kernelCutoff;
 
     ImGui::NewLine();
     ImGui::Text("Equation of State");
     ImGui::InputFloat("Pressure Coefficient", &state->EOSCoefficient);
     ImGui::InputFloat("Density Exponent", &state->EOSExponent);
     ImGui::InputFloat("Rest Density", &state->EOSRestDensity);
+
+    ImGui::NewLine();
+    ImGui::Text("Viscosity");
+    ImGui::InputFloat("Viscosity Coefficient", &state->viscosityCoefficient);
+
+    ImGui::NewLine();
+    ImGui::Text("Gravity");
+    ImGui::InputFloat("Gravitational Pull", &state->gravitationalPull);
 
     ImGui::End();
 }
@@ -168,6 +190,9 @@ void updateParticles(ProgramState* state) {
     computePressures(state);
 
     applyPressureForces(state);
+    applyViscosityForces(state);
+
+    applyWallForces(state);
 
     integrateParticles(state);
     applyBoundaryConditions(state);
@@ -177,7 +202,7 @@ void updateParticles(ProgramState* state) {
 void integrateParticles(ProgramState* state) {
     float dT = state->deltaTime;
     for (int i = 0; i < state->particleAmount; i++) {
-        state->particles[i].velocity += state->particles[i].forces * (dT / state->particles[i].mass);
+        state->particles[i].velocity += state->particles[i].forces * (dT / state->particles[i].density);
         state->particles[i].position += state->particles[i].velocity * dT;
     }
 }
@@ -193,17 +218,29 @@ void applyBoundaryConditions(ProgramState* state) {
     }
 }
 
+void applyWallForces(ProgramState* state) {
+    for (int i = 0; i < state->particleAmount; i++) {
+        sf::Vector2f wallForce = sf::Vector2f(0, 0);
+        if (state->particles[i].position.x < 0 + state->wallPushCutoff) wallForce.x += state->wallPushStrength;
+        if (state->particles[i].position.y < 0 + state->wallPushCutoff) wallForce.y += state->wallPushStrength;
+        if (state->particles[i].position.x > state->width - state->wallPushCutoff) wallForce.x -= state->wallPushStrength;
+        if (state->particles[i].position.y > state->height - state->wallPushCutoff) wallForce.y -= state->wallPushStrength;
+
+        state->particles[i].forces += wallForce;
+    }
+}
+
 
 void resetParticleForces(ProgramState* state) {
     for (int i = 0; i < state->particleAmount; i++) {
-        state->particles[i].forces *= 0.0f;
+        state->particles[i].forces = sf::Vector2f(0.0f, state->gravitationalPull);
     }
 }
 
 
 void computeDensities(ProgramState* state) {
     for (int i = 0; i < state->particleAmount; i++) {
-        state->particles[i].density = SPHDensity(state->particles[i].position, state->particles, state->particleAmount, state->kernelCutoff, state->kernelCutoffSquared);
+        state->particles[i].density = SPHDensity(state->particles[i].position, state->particles, state->particleAmount, state->kernelCutoff);
     }
 }
 
@@ -217,11 +254,11 @@ void computePressures(ProgramState *state) {
 
 
 float EOSPressure(float density, float restDensity, float k, float gamma) {
-    return k * (std::pow(density / restDensity, gamma) - 1);
+    return -k * (std::pow(density / restDensity, gamma) - 1);
 }
 
 
-float SPHDensity(sf::Vector2f position, Particle* particles, int particleAmount, float cutoff, float cutoffSquared) {
+float SPHDensity(sf::Vector2f position, Particle* particles, int particleAmount, float cutoff) {
     float density = 0.0f;
     
     for (int j = 0; j < particleAmount; j++) {
@@ -230,9 +267,9 @@ float SPHDensity(sf::Vector2f position, Particle* particles, int particleAmount,
 
         if (std::abs(dX) >= cutoff || std::abs(dY) >= cutoff) continue;
 
-        float distanceSquared = dX*dX + dY*dY;
+        float distance = std::sqrt(dX*dX + dY*dY);
         
-        density += particles[j].mass * SPHKernel(distanceSquared, cutoffSquared);
+        density += particles[j].mass * SPHKernel(distance, cutoff);
     }
 
     return density;
@@ -241,42 +278,72 @@ float SPHDensity(sf::Vector2f position, Particle* particles, int particleAmount,
 
 void applyPressureForces(ProgramState *state) {
     for (int i = 0; i < state->particleAmount; i++) {
-        state->particles[i].forces += calculatePressureForce(i, state->particles, state->particleAmount, state->kernelCutoffSquared);
+        calculatePressureForce(i, state->particles, state->particleAmount, state->kernelCutoff);
     }
 }
 
 
-sf::Vector2f calculatePressureForce(int particleIndex, Particle *particles, int particleAmount, float cutoffSquared) {
-    sf::Vector2f pressureForce = sf::Vector2f(0, 0);
-
+void calculatePressureForce(int particleIndex, Particle* particles, int particleAmount, float cutoff) {
     for (int j = 0; j < particleAmount; j++) {
         if (j == particleIndex) continue;
 
         float scalarPart = particles[j].mass * (particles[particleIndex].pressureOverDSquared + particles[j].pressureOverDSquared);
-        pressureForce -= scalarPart * SPHKernelGradient(particles[particleIndex].position, particles[j].position, cutoffSquared);
+        sf::Vector2f pressureForce = scalarPart * SPHKernelGradient(particles[particleIndex].position, particles[j].position, cutoff);
+        particles[particleIndex].forces -= pressureForce;
+        particles[j].forces += pressureForce;
     }
-
-    return pressureForce;
 }
 
 
-float SPHKernel(float distanceSquared, float cutoffSquared) {
-    if (distanceSquared >= cutoffSquared) return 0.0f;
-    const float q = distanceSquared/cutoffSquared;
-    return std::pow(q, 2.0f) - 2*q + 1.0f;
+void applyViscosityForces(ProgramState *state) {
+    for (int i = 0; i < state->particleAmount; i++) {
+        calculateViscosityForce(i, state->particles, state->particleAmount, state->kernelCutoff, state->viscosityCoefficient);
+    }
 }
 
 
-sf::Vector2f SPHKernelGradient(sf::Vector2f iPosition, sf::Vector2f jPosition, float cutoffSquared) {
+
+void calculateViscosityForce(int particleIndex, Particle* particles, int particleAmount, float cutoff, float viscosityCoefficient) {
+    for (int j = 0; j < particleAmount; j++) {
+        if (j == particleIndex) continue;
+
+        float distance = std::sqrt((particles[particleIndex].position.x - particles[j].position.x) * (particles[particleIndex].position.x - particles[j].position.x)
+            + (particles[particleIndex].position.y - particles[j].position.y) * (particles[particleIndex].position.y - particles[j].position.y));
+        if (distance == 0.0f) continue;
+
+        sf::Vector2f viscosityForce = viscosityCoefficient * particles[j].mass * SPHKernelLaplacian(distance, cutoff) / particles[j].density * (particles[j].velocity - particles[particleIndex].velocity);
+
+        particles[particleIndex].forces += viscosityForce;
+        particles[j].forces -= viscosityForce;
+    }
+}
+
+
+
+float SPHKernel(float distance, float cutoff) {
+    if (distance >= cutoff) return 0.0f;
+    const float q = distance/cutoff;
+    return std::pow(1 - q, 5.0f);
+}
+
+
+sf::Vector2f SPHKernelGradient(sf::Vector2f iPosition, sf::Vector2f jPosition, float cutoff) {
     sf::Vector2f vectorPart = jPosition - iPosition;
 
-    float distanceSquared = vectorPart.x * vectorPart.x + vectorPart.y * vectorPart.y;
+    float distance = std::sqrt(vectorPart.x * vectorPart.x + vectorPart.y * vectorPart.y);
 
-    if (distanceSquared >= cutoffSquared) return sf::Vector2f(0, 0);
+    if (distance >= cutoff || distance == 0.0f) return {0, 0};
 
-    float scalarPart = 4.0f / cutoffSquared * (distanceSquared / cutoffSquared - 1);
+    float scalarPart = -5 / (distance * cutoff) * std::pow(1 - distance / cutoff, 4.0f);
 
     return vectorPart * scalarPart;
+}
+
+
+float SPHKernelLaplacian(float distance, float cutoff) {
+    if (distance >= cutoff) return 0.0f;
+    float inverseCutoff = 1 / cutoff;
+    return 20 * inverseCutoff * inverseCutoff * std::pow(1 - distance * inverseCutoff, 3.0f);
 }
 
 
