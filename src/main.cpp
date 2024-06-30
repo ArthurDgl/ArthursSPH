@@ -43,6 +43,8 @@ struct ProgramState {
 
     float wallPushCutoff;
     float wallPushStrength;
+
+    float inflowSpeed;
 };
 
 void render(ProgramState* state);
@@ -76,17 +78,18 @@ float randomFloat(float lowerBound, float upperBound); // From ChatGPT
 
 int main() {
     ProgramState state = {
-        .width = 400,
+        .width = 800,
         .height = 300,
-        .particleAmount = 200,
+        .particleAmount = 400,
         .kernelCutoff = 100.0f,
         .EOSCoefficient = 100000.0f,
         .EOSExponent = 1.0f,
         .EOSRestDensity = 3.0f,
-        .viscosityCoefficient = 500.0f,
-        .gravitationalPull = 100.0f,
+        .viscosityCoefficient = 1000.0f,
+        .gravitationalPull = 0.0f,//100.0f,
         .wallPushCutoff = 30.0f,
-        .wallPushStrength = 300.0f
+        .wallPushStrength = 300.0f,
+        .inflowSpeed = 100.0f
     };
     state.particles = new Particle[state.particleAmount];
 
@@ -175,7 +178,7 @@ void initializeParticles(ProgramState* state) {
         state->particles[i] = Particle{
             1.0f,
             sf::Vector2f(randomFloat(0, 1.0f*state->width), randomFloat(0, 1.0f*state->height)),
-            sf::Vector2f(0, 0),
+            sf::Vector2f(state->inflowSpeed, 0),
             sf::Vector2f(0, 0),
             5
         };
@@ -210,10 +213,12 @@ void integrateParticles(ProgramState* state) {
 void applyBoundaryConditions(ProgramState* state) {
     int r = state->particles->radius * 2;
     for (int i = 0; i < state->particleAmount; i++) {
-        if (state->particles[i].position.x > state->width - r) state->particles[i].position.x = state->width - r;
+        if (state->particles[i].position.x > state->width) {
+            state->particles[i].position.x = -2*state->particles[i].radius;
+        }
         if (state->particles[i].position.y > state->height - r) state->particles[i].position.y = state->height - r;
 
-        if (state->particles[i].position.x < 0) state->particles[i].position.x = 0.0f;
+        if (state->particles[i].position.x < 0) state->particles[i].velocity = {state->inflowSpeed, 0.0f};
         if (state->particles[i].position.y < 0) state->particles[i].position.y = 0.0f;
     }
 }
@@ -223,7 +228,7 @@ void applyWallForces(ProgramState* state) {
         sf::Vector2f wallForce = sf::Vector2f(0, 0);
         if (state->particles[i].position.x < 0 + state->wallPushCutoff) wallForce.x += state->wallPushStrength;
         if (state->particles[i].position.y < 0 + state->wallPushCutoff) wallForce.y += state->wallPushStrength;
-        if (state->particles[i].position.x > state->width - state->wallPushCutoff) wallForce.x -= state->wallPushStrength;
+        //if (state->particles[i].position.x > state->width - state->wallPushCutoff) wallForce.x -= state->wallPushStrength;
         if (state->particles[i].position.y > state->height - state->wallPushCutoff) wallForce.y -= state->wallPushStrength;
 
         state->particles[i].forces += wallForce;
@@ -307,8 +312,12 @@ void calculateViscosityForce(int particleIndex, Particle* particles, int particl
     for (int j = 0; j < particleAmount; j++) {
         if (j == particleIndex) continue;
 
-        float distance = std::sqrt((particles[particleIndex].position.x - particles[j].position.x) * (particles[particleIndex].position.x - particles[j].position.x)
-            + (particles[particleIndex].position.y - particles[j].position.y) * (particles[particleIndex].position.y - particles[j].position.y));
+        float dX = particles[particleIndex].position.x - particles[j].position.x;
+        float dY = particles[particleIndex].position.y - particles[j].position.y;
+
+        if (std::abs(dX) >= cutoff || std::abs(dY) >= cutoff) continue;
+
+        float distance = std::sqrt(dX*dX + dY*dY);
         if (distance == 0.0f) continue;
 
         sf::Vector2f viscosityForce = viscosityCoefficient * particles[j].mass * SPHKernelLaplacian(distance, cutoff) / particles[j].density * (particles[j].velocity - particles[particleIndex].velocity);
@@ -329,6 +338,8 @@ float SPHKernel(float distance, float cutoff) {
 
 sf::Vector2f SPHKernelGradient(sf::Vector2f iPosition, sf::Vector2f jPosition, float cutoff) {
     sf::Vector2f vectorPart = jPosition - iPosition;
+
+    if (std::abs(vectorPart.x) >= cutoff || std::abs(vectorPart.y) >= cutoff) return {0.0f, 0.0f};
 
     float distance = std::sqrt(vectorPart.x * vectorPart.x + vectorPart.y * vectorPart.y);
 
