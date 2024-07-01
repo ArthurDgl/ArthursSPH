@@ -23,6 +23,11 @@ struct Particle {
     int partitionIndex;
 };
 
+struct SphereObstacle {
+    sf::Vector2f position;
+    float radius;
+};
+
 struct ProgramState {
     unsigned int width;
     unsigned int height;
@@ -54,6 +59,8 @@ struct ProgramState {
     int partitionSize;
     int partitionResolutionX;
     int partitionResolutionY;
+
+    SphereObstacle obstacle;
 };
 
 void render(ProgramState* state);
@@ -97,16 +104,17 @@ int main() {
     ProgramState state = {
         .width = 800,
         .height = 300,
-        .particleAmount = 1800,
+        .particleAmount = 2000,
         .kernelCutoff = 20.0f,
-        .EOSCoefficient = 400000.0f,
-        .EOSExponent = 1.0f,
-        .EOSRestDensity = 1.1f,
-        .viscosityCoefficient = 100.0f,
+        .EOSCoefficient = 200000.0f,
+        .EOSExponent = 2.0f,
+        .EOSRestDensity = 1.01f,
+        .viscosityCoefficient = 1500.0f,
         .gravitationalPull = 0.0f,//100.0f,
-        .wallPushCutoff = 30.0f,
-        .wallPushStrength = 300.0f,
-        .inflowSpeed = 100.0f
+        .wallPushCutoff = 20.0f,
+        .wallPushStrength = 4000.0f,
+        .inflowSpeed = 100.0f,
+        .obstacle = SphereObstacle{sf::Vector2f(200, 150), 50}
     };
     state.particles = new Particle[state.particleAmount];
 
@@ -278,6 +286,13 @@ void applyBoundaryConditions(ProgramState* state) {
 
         if (state->particles[i].position.x < 0) state->particles[i].velocity = {state->inflowSpeed, 0.0f};
         if (state->particles[i].position.y < 0) state->particles[i].position.y = 0.0f;
+
+        float sphereDist = sqrt(pow(state->particles[i].position.x - state->obstacle.position.x, 2.0f)
+            + pow(state->particles[i].position.y - state->obstacle.position.y, 2.0f));
+        float error = state->particles[i].radius + state->obstacle.radius - sphereDist;
+        if (error > 0) {
+            state->particles[i].position += (state->particles[i].position - state->obstacle.position) * (error / sphereDist);
+        }
     }
 }
 
