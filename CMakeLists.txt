@@ -27,6 +27,15 @@ target_link_libraries(main PRIVATE sfml-graphics sfml-window sfml-system)
 target_compile_features(main PRIVATE cxx_std_17)
 target_include_directories(main PRIVATE libs/imgui libs/imgui-sfml)
 
+# Find OpenMP package
+find_package(OpenMP REQUIRED)
+
+# Add OpenMP flags to the compiler
+if(OpenMP_CXX_FOUND)
+    target_compile_options(main PRIVATE ${OpenMP_CXX_FLAGS})
+    target_link_libraries(main PRIVATE ${OpenMP_CXX_LIBRARIES})
+endif()
+
 if(WIN32)
     add_custom_command(
         TARGET main

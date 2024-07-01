@@ -4,6 +4,7 @@
 #include <../../../../libs/imgui-sfml/imgui-SFML.h>
 #include <cmath>
 #include <random>
+#include <omp.h>
 
 #include "../cmake-build-debug/_deps/sfml-src/extlibs/headers/glad/include/glad/gl.h"
 
@@ -99,21 +100,22 @@ sf::Vector2f SPHKernelGradient(sf::Vector2f iPosition, sf::Vector2f jPosition, f
 float SPHKernelLaplacian(float distance, float cutoff);
 
 float randomFloat(float lowerBound, float upperBound); // From ChatGPT
+float dotProduct(sf::Vector2f v1, sf::Vector2f v2);
 
 int main() {
     ProgramState state = {
         .width = 800,
         .height = 300,
-        .particleAmount = 2000,
+        .particleAmount = 10000,
         .kernelCutoff = 20.0f,
         .EOSCoefficient = 200000.0f,
-        .EOSExponent = 2.0f,
-        .EOSRestDensity = 1.01f,
-        .viscosityCoefficient = 1500.0f,
+        .EOSExponent = 1.0f,
+        .EOSRestDensity = 0.5f,
+        .viscosityCoefficient = 1000.0f,
         .gravitationalPull = 0.0f,//100.0f,
         .wallPushCutoff = 20.0f,
-        .wallPushStrength = 4000.0f,
-        .inflowSpeed = 100.0f,
+        .wallPushStrength = 8000.0f,
+        .inflowSpeed = 500.0f,
         .obstacle = SphereObstacle{sf::Vector2f(200, 150), 50}
     };
     state.particles = new Particle[state.particleAmount];
@@ -151,13 +153,16 @@ void render(ProgramState *state) {
     state->window->clear();
 
     sf::CircleShape circle = sf::CircleShape(state->particles->radius);
-    sf::Color color = sf::Color::White;
+    sf::Color color = sf::Color::Black;
 
     // Render Code here
     for (int i = 0; i < state->particleAmount; i++) {
         circle.setPosition(state->particles[i].position);
-        if (state->particles[i].density < state->EOSRestDensity) color = sf::Color::Green;
-        else color = sf::Color::Red;
+        float t = (state->particles[i].velocity.x / (state->inflowSpeed * 1.2f) + 1.0f) / 2.0f;
+        if (t < 0) t = 0.0f;
+        if (t > 1) t = 1.0f;
+        color.r = 255 * t;
+        color.g = 255 * (1 - t);
         circle.setFillColor(color);
         state->window->draw(circle);
     }
@@ -227,7 +232,10 @@ int getPartitionIndex(sf::Vector2f position, ProgramState* state) {
 void partitionParticles(ProgramState *state) {
     for (int i = 0; i < state->particleAmount; i++) {
         int index = getPartitionIndex(state->particles[i].position, state);
-        if (index < 0 ||index >= state->partitionSize) index = 0;
+        if (index < 0 ||index >= state->partitionSize) {
+            std::cout << state->particles[i].position.x << "," << state->particles[i].position.y << "\n";
+            index = 0;
+        }
 
         state->particles[i].partitionIndex = index;
         state->partition[index].push_back(i);
@@ -242,7 +250,7 @@ void initializeParticles(ProgramState* state) {
             sf::Vector2f(randomFloat(0, 1.0f*state->width), randomFloat(0, 1.0f*state->height)),
             sf::Vector2f(state->inflowSpeed, 0),
             sf::Vector2f(0, 0),
-            5
+            2
         };
     }
 }
@@ -262,6 +270,7 @@ void updateParticles(ProgramState* state) {
 
     applyWallForces(state);
 
+    applyBoundaryConditions(state);
     integrateParticles(state);
     applyBoundaryConditions(state);
 }
@@ -276,15 +285,15 @@ void integrateParticles(ProgramState* state) {
 }
 
 void applyBoundaryConditions(ProgramState* state) {
-    int r = state->particles->radius * 2;
     for (int i = 0; i < state->particleAmount; i++) {
         if (state->particles[i].position.x > state->width) {
-            state->particles[i].position.x = -2*state->particles[i].radius + 1;
+            state->particles[i].position.x -= state->width + state->kernelCutoff/2.0f;
             //state->particles[i].position.y = randomFloat(state->wallPushCutoff, state->height - state->wallPushCutoff);
         }
-        if (state->particles[i].position.y > state->height - r) state->particles[i].position.y = state->height - r;
+        if (state->particles[i].position.y > state->height) state->particles[i].position.y = state->height;
+        if (state->particles[i].position.x < -state->kernelCutoff) state->particles[i].position.x = -state->kernelCutoff;
 
-        if (state->particles[i].position.x < 0) state->particles[i].velocity = {state->inflowSpeed, 0.0f};
+        if (state->particles[i].position.x < 20 || state->particles[i].position.x > state->width - 20) state->particles[i].velocity = {state->inflowSpeed, 0.0f};
         if (state->particles[i].position.y < 0) state->particles[i].position.y = 0.0f;
 
         float sphereDist = sqrt(pow(state->particles[i].position.x - state->obstacle.position.x, 2.0f)
@@ -317,6 +326,7 @@ void resetParticleForces(ProgramState* state) {
 
 
 void computeDensities(ProgramState* state) {
+    #pragma omp parallel for num_threads(32)
     for (int i = 0; i < state->particleAmount; i++) {
         state->particles[i].density = SPHDensity(state->particles[i].position, state);
     }
@@ -324,6 +334,7 @@ void computeDensities(ProgramState* state) {
 
 
 void computePressures(ProgramState *state) {
+    #pragma omp parallel for num_threads(32)
     for (int i = 0; i < state->particleAmount; i++) {
         state->particles[i].pressure = EOSPressure(state->particles[i].density, state->EOSRestDensity, state->EOSCoefficient, state->EOSExponent);
         state->particles[i].pressureOverDSquared = state->particles[i].pressure / (state->particles[i].density * state->particles[i].density);
@@ -333,6 +344,7 @@ void computePressures(ProgramState *state) {
 
 float EOSPressure(float density, float restDensity, float k, float gamma) {
     return -k * (std::pow(density / restDensity, gamma) - 1);
+    //return -k * (density - restDensity);
 }
 
 
@@ -368,6 +380,7 @@ float SPHDensitySingle(sf::Vector2f position, Particle* particles, int j, float 
 
 
 void applyPressureForces(ProgramState *state) {
+    #pragma omp parallel for num_threads(32)
     for (int i = 0; i < state->particleAmount; i++) {
         calculatePressureForce(i, state);
     }
@@ -392,7 +405,7 @@ void calculatePressureForce(int particleIndex, ProgramState* state) {
 }
 
 void calculatePressureForceSingle(int particleIndex, int j, Particle* particles, float cutoff) {
-    float scalarPart = particles[j].mass * (particles[particleIndex].pressureOverDSquared + particles[j].pressureOverDSquared);
+    float scalarPart = particles[j].mass / particles[j].density * (particles[particleIndex].pressureOverDSquared + particles[j].pressureOverDSquared);
     sf::Vector2f pressureForce = scalarPart * SPHKernelGradient(particles[particleIndex].position, particles[j].position, cutoff);
     particles[particleIndex].forces -= pressureForce;
     particles[j].forces += pressureForce;
@@ -400,6 +413,7 @@ void calculatePressureForceSingle(int particleIndex, int j, Particle* particles,
 
 
 void applyViscosityForces(ProgramState *state) {
+    #pragma omp parallel for num_threads(32)
     for (int i = 0; i < state->particleAmount; i++) {
         calculateViscosityForce(i, state);
     }
@@ -435,6 +449,20 @@ void calculateViscosityForceSingle(int particleIndex, int j, Particle* particles
     if (distance == 0.0f) return;
 
     sf::Vector2f viscosityForce = viscosityCoefficient * particles[j].mass * SPHKernelLaplacian(distance, cutoff) / particles[j].density * (particles[j].velocity - particles[particleIndex].velocity);
+
+    // sf::Vector2f viscosityForce = viscosityCoefficient * particles[j].mass / particles[j].density
+    //     * (particles[particleIndex].velocity / (particles[particleIndex].density * particles[particleIndex].density)
+    //         + particles[j].velocity / (particles[j].density * particles[j].density));
+
+    // sf::Vector2f viscosityForce = - viscosityCoefficient / particles[particleIndex].density
+    // * dotProduct(particles[particleIndex].velocity - particles[j].velocity, particles[particleIndex].position - particles[j].position)
+    // / (distance * distance) * SPHKernelGradient(particles[particleIndex].position, particles[j].position, cutoff);
+
+    // sf::Vector2f viscosityForce = -particles[j].mass * viscosityCoefficient
+    //     / (particles[particleIndex].density * particles[j].density)
+    //     * dotProduct(particles[particleIndex].position - particles[j].position, SPHKernelGradient(particles[particleIndex].position, particles[j].position, cutoff))
+    //     / (distance * distance)
+    //     * (particles[particleIndex].velocity - particles[j].velocity);
 
     particles[particleIndex].forces += viscosityForce;
     particles[j].forces -= viscosityForce;
@@ -475,4 +503,8 @@ float randomFloat(float lowerBound, float upperBound) { // From ChatGPT
     std::mt19937 gen(rd());
     std::uniform_real_distribution<> dis(lowerBound, upperBound);
     return dis(gen);
+}
+
+float dotProduct(sf::Vector2f v1, sf::Vector2f v2) {
+    return v1.x * v2.x + v1.y * v2.y;
 }
