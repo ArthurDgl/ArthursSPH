@@ -5,6 +5,8 @@
 #include <cmath>
 #include <random>
 
+#include "../cmake-build-debug/_deps/sfml-src/extlibs/headers/glad/include/glad/gl.h"
+
 struct Particle {
     float mass;
     sf::Vector2f position;
@@ -17,6 +19,8 @@ struct Particle {
     float density;
     float pressure;
     float pressureOverDSquared;
+
+    int partitionIndex;
 };
 
 struct ProgramState {
@@ -45,10 +49,20 @@ struct ProgramState {
     float wallPushStrength;
 
     float inflowSpeed;
+
+    std::vector<int>* partition;
+    int partitionSize;
+    int partitionResolutionX;
+    int partitionResolutionY;
 };
 
 void render(ProgramState* state);
 void displayGui(ProgramState* state);
+
+void initializePartition(ProgramState* state);
+void clearPartition(ProgramState* state);
+int getPartitionIndex(sf::Vector2f position, ProgramState* state);
+void partitionParticles(ProgramState* state);
 
 void initializeParticles(ProgramState* state);
 void updateParticles(ProgramState* state);
@@ -59,16 +73,19 @@ void applyBoundaryConditions(ProgramState* state);
 void applyWallForces(ProgramState* state);
 
 void computeDensities(ProgramState* state);
-float SPHDensity(sf::Vector2f position, Particle* particles, int particleAmount, float cutoff);
+float SPHDensity(sf::Vector2f position, ProgramState* state);
+float SPHDensitySingle(sf::Vector2f position, Particle* particles, int j, float cutoff);
 
 void computePressures(ProgramState* state);
 float EOSPressure(float density, float restDensity, float k, float gamma);
 
 void applyPressureForces(ProgramState* state);
-void calculatePressureForce(int particleIndex, Particle* particles, int particleAmount, float cutoff);
+void calculatePressureForce(int particleIndex, ProgramState* state);
+void calculatePressureForceSingle(int particleIndex, int j, Particle* particles, float cutoff);
 
 void applyViscosityForces(ProgramState* state);
-void calculateViscosityForce(int particleIndex, Particle* particles, int particleAmount, float cutoff, float viscosityCoefficient);
+void calculateViscosityForce(int particleIndex, ProgramState* state);
+void calculateViscosityForceSingle(int particleIndex, int j, Particle* particles, float cutoff, float viscosityCoefficient);
 
 float SPHKernel(float distance, float cutoff);
 sf::Vector2f SPHKernelGradient(sf::Vector2f iPosition, sf::Vector2f jPosition, float cutoff);
@@ -80,12 +97,12 @@ int main() {
     ProgramState state = {
         .width = 800,
         .height = 300,
-        .particleAmount = 400,
-        .kernelCutoff = 100.0f,
-        .EOSCoefficient = 100000.0f,
+        .particleAmount = 1800,
+        .kernelCutoff = 20.0f,
+        .EOSCoefficient = 400000.0f,
         .EOSExponent = 1.0f,
-        .EOSRestDensity = 3.0f,
-        .viscosityCoefficient = 1000.0f,
+        .EOSRestDensity = 1.1f,
+        .viscosityCoefficient = 100.0f,
         .gravitationalPull = 0.0f,//100.0f,
         .wallPushCutoff = 30.0f,
         .wallPushStrength = 300.0f,
@@ -94,6 +111,8 @@ int main() {
     state.particles = new Particle[state.particleAmount];
 
     initializeParticles(&state);
+
+    initializePartition(&state);
 
     state.window = new sf::RenderWindow{ { state.width, state.height }, "ArthursSPH" };
     state.window->setFramerateLimit(144);
@@ -112,8 +131,6 @@ int main() {
 
         updateParticles(&state);
         render(&state);
-
-        std::cout << state.particles[0].density << "\n";
     }
 
     ImGui::SFML::Shutdown();
@@ -173,6 +190,43 @@ void displayGui(ProgramState *state) {
 }
 
 
+void initializePartition(ProgramState* state) {
+    state->partitionResolutionX = state->width / state->kernelCutoff + 2;
+    state->partitionResolutionY = state->height / state->kernelCutoff + 2;
+
+    state->partitionSize = state->partitionResolutionX * state->partitionResolutionY;
+    state->partition = new std::vector<int>[state->partitionSize];
+
+    for (int i = 0; i < state->partitionSize; i++) {
+        state->partition[i] = std::vector<int>();
+        state->partition[i].clear();
+    }
+}
+
+void clearPartition(ProgramState* state) {
+    for (int i = 0; i < state->partitionSize; i++) {
+        state->partition[i].clear();
+    }
+}
+
+int getPartitionIndex(sf::Vector2f position, ProgramState* state) {
+    int xIndex = position.x / state->kernelCutoff + 1;
+    int yIndex = position.y / state->kernelCutoff + 1;
+
+    return xIndex * state->partitionResolutionY + yIndex;
+}
+
+void partitionParticles(ProgramState *state) {
+    for (int i = 0; i < state->particleAmount; i++) {
+        int index = getPartitionIndex(state->particles[i].position, state);
+        if (index < 0 ||index >= state->partitionSize) index = 0;
+
+        state->particles[i].partitionIndex = index;
+        state->partition[index].push_back(i);
+    }
+}
+
+
 void initializeParticles(ProgramState* state) {
     for (int i = 0; i < state->particleAmount; i++) {
         state->particles[i] = Particle{
@@ -187,6 +241,9 @@ void initializeParticles(ProgramState* state) {
 
 
 void updateParticles(ProgramState* state) {
+    clearPartition(state);
+    partitionParticles(state);
+
     resetParticleForces(state);
 
     computeDensities(state);
@@ -214,7 +271,8 @@ void applyBoundaryConditions(ProgramState* state) {
     int r = state->particles->radius * 2;
     for (int i = 0; i < state->particleAmount; i++) {
         if (state->particles[i].position.x > state->width) {
-            state->particles[i].position.x = -2*state->particles[i].radius;
+            state->particles[i].position.x = -2*state->particles[i].radius + 1;
+            //state->particles[i].position.y = randomFloat(state->wallPushCutoff, state->height - state->wallPushCutoff);
         }
         if (state->particles[i].position.y > state->height - r) state->particles[i].position.y = state->height - r;
 
@@ -245,7 +303,7 @@ void resetParticleForces(ProgramState* state) {
 
 void computeDensities(ProgramState* state) {
     for (int i = 0; i < state->particleAmount; i++) {
-        state->particles[i].density = SPHDensity(state->particles[i].position, state->particles, state->particleAmount, state->kernelCutoff);
+        state->particles[i].density = SPHDensity(state->particles[i].position, state);
     }
 }
 
@@ -263,70 +321,109 @@ float EOSPressure(float density, float restDensity, float k, float gamma) {
 }
 
 
-float SPHDensity(sf::Vector2f position, Particle* particles, int particleAmount, float cutoff) {
+float SPHDensity(sf::Vector2f position, ProgramState* state) {
     float density = 0.0f;
-    
-    for (int j = 0; j < particleAmount; j++) {
-        float dX = position.x - particles[j].position.x;
-        float dY = position.y - particles[j].position.y;
 
-        if (std::abs(dX) >= cutoff || std::abs(dY) >= cutoff) continue;
+    int center = getPartitionIndex(position, state);
 
-        float distance = std::sqrt(dX*dX + dY*dY);
-        
-        density += particles[j].mass * SPHKernel(distance, cutoff);
+    for (int k = -1; k <= 1; k++) {
+        for (int l = -1; l <= 1; l++) {
+            int vectorIndex = center + k*state->partitionResolutionY + l;
+            if (vectorIndex < 0 || vectorIndex >= state->partitionSize) continue;
+
+            for (int m = 0; m < state->partition[vectorIndex].size(); m++) {
+                density += SPHDensitySingle(position, state->particles, state->partition[vectorIndex].at(m), state->kernelCutoff);
+            }
+        }
     }
 
     return density;
 }
 
+float SPHDensitySingle(sf::Vector2f position, Particle* particles, int j, float cutoff) {
+    float dX = position.x - particles[j].position.x;
+    float dY = position.y - particles[j].position.y;
+
+    if (std::abs(dX) >= cutoff || std::abs(dY) >= cutoff) return 0.0f;
+
+    float distance = std::sqrt(dX*dX + dY*dY);
+
+    return particles[j].mass * SPHKernel(distance, cutoff);
+}
+
 
 void applyPressureForces(ProgramState *state) {
     for (int i = 0; i < state->particleAmount; i++) {
-        calculatePressureForce(i, state->particles, state->particleAmount, state->kernelCutoff);
+        calculatePressureForce(i, state);
     }
 }
 
 
-void calculatePressureForce(int particleIndex, Particle* particles, int particleAmount, float cutoff) {
-    for (int j = 0; j < particleAmount; j++) {
-        if (j == particleIndex) continue;
+void calculatePressureForce(int particleIndex, ProgramState* state) {
+    int center = state->particles[particleIndex].partitionIndex;
 
-        float scalarPart = particles[j].mass * (particles[particleIndex].pressureOverDSquared + particles[j].pressureOverDSquared);
-        sf::Vector2f pressureForce = scalarPart * SPHKernelGradient(particles[particleIndex].position, particles[j].position, cutoff);
-        particles[particleIndex].forces -= pressureForce;
-        particles[j].forces += pressureForce;
+    for (int k = -1; k <= 1; k++) {
+        for (int l = -1; l <= 1; l++) {
+            int vectorIndex = center + k*state->partitionResolutionY + l;
+            if (vectorIndex < 0 || vectorIndex >= state->partitionSize) continue;
+
+            for (int m = 0; m < state->partition[vectorIndex].size(); m++) {
+                int j = state->partition[vectorIndex].at(m);
+                if (j == particleIndex) continue;
+                calculatePressureForceSingle(particleIndex, j, state->particles, state->kernelCutoff);
+            }
+        }
     }
+}
+
+void calculatePressureForceSingle(int particleIndex, int j, Particle* particles, float cutoff) {
+    float scalarPart = particles[j].mass * (particles[particleIndex].pressureOverDSquared + particles[j].pressureOverDSquared);
+    sf::Vector2f pressureForce = scalarPart * SPHKernelGradient(particles[particleIndex].position, particles[j].position, cutoff);
+    particles[particleIndex].forces -= pressureForce;
+    particles[j].forces += pressureForce;
 }
 
 
 void applyViscosityForces(ProgramState *state) {
     for (int i = 0; i < state->particleAmount; i++) {
-        calculateViscosityForce(i, state->particles, state->particleAmount, state->kernelCutoff, state->viscosityCoefficient);
+        calculateViscosityForce(i, state);
     }
 }
 
 
 
-void calculateViscosityForce(int particleIndex, Particle* particles, int particleAmount, float cutoff, float viscosityCoefficient) {
-    for (int j = 0; j < particleAmount; j++) {
-        if (j == particleIndex) continue;
+void calculateViscosityForce(int particleIndex, ProgramState* state) {
+    int center = state->particles[particleIndex].partitionIndex;
 
-        float dX = particles[particleIndex].position.x - particles[j].position.x;
-        float dY = particles[particleIndex].position.y - particles[j].position.y;
+    for (int k = -1; k <= 1; k++) {
+        for (int l = -1; l <= 1; l++) {
+            int vectorIndex = center + k*state->partitionResolutionY + l;
+            if (vectorIndex < 0 || vectorIndex >= state->partitionSize) continue;
 
-        if (std::abs(dX) >= cutoff || std::abs(dY) >= cutoff) continue;
-
-        float distance = std::sqrt(dX*dX + dY*dY);
-        if (distance == 0.0f) continue;
-
-        sf::Vector2f viscosityForce = viscosityCoefficient * particles[j].mass * SPHKernelLaplacian(distance, cutoff) / particles[j].density * (particles[j].velocity - particles[particleIndex].velocity);
-
-        particles[particleIndex].forces += viscosityForce;
-        particles[j].forces -= viscosityForce;
+            for (int m = 0; m < state->partition[vectorIndex].size(); m++) {
+                int j = state->partition[vectorIndex].at(m);
+                if (j == particleIndex) continue;
+                calculateViscosityForceSingle(particleIndex, j, state->particles, state->kernelCutoff, state->viscosityCoefficient);
+            }
+        }
     }
 }
 
+
+void calculateViscosityForceSingle(int particleIndex, int j, Particle* particles, float cutoff, float viscosityCoefficient) {
+    float dX = particles[particleIndex].position.x - particles[j].position.x;
+    float dY = particles[particleIndex].position.y - particles[j].position.y;
+
+    if (std::abs(dX) >= cutoff || std::abs(dY) >= cutoff) return;
+
+    float distance = std::sqrt(dX*dX + dY*dY);
+    if (distance == 0.0f) return;
+
+    sf::Vector2f viscosityForce = viscosityCoefficient * particles[j].mass * SPHKernelLaplacian(distance, cutoff) / particles[j].density * (particles[j].velocity - particles[particleIndex].velocity);
+
+    particles[particleIndex].forces += viscosityForce;
+    particles[j].forces -= viscosityForce;
+}
 
 
 float SPHKernel(float distance, float cutoff) {
