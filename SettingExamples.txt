@@ -1,0 +1,55 @@
+
+HIGH EXPONENT, LOW PRESSURE, MEDIUM VISCOSITY
+
+ProgramState state = {
+    .width = 800,
+    .height = 600,
+    .particleAmount = 2200,
+    .predictionAmount = 0.005f,
+    .kernelCutoff = 50.0f,
+    .EOSCoefficient = 100000.0f,
+    .EOSExponent = 5.0f,
+    .EOSRestDensity = 1.6f,
+    .viscosityCoefficient = 400.0f,
+    .gravitationalPull = 0.0f,//100.0f,
+    .wallPushCutoff = 0.0f,
+    .wallPushStrength = 4000.0f,
+    .inflowSpeed = 150.0f,
+};
+
+
+MEH
+
+ProgramState state = {
+        .width = 800,
+        .height = 600,
+        .particleAmount = 2200,
+        .predictionAmount = 0.005f,
+        .kernelCutoff = 30.0f,
+        .EOSCoefficient = 1000000.0f,
+        .EOSExponent = 1.0f,
+        .EOSRestDensity = 1.03f,
+        .viscosityCoefficient = 500.0f,
+        .gravitationalPull = 0.0f,//100.0f,
+        .wallPushCutoff = 0.0f,
+        .wallPushStrength = 4000.0f,
+        .inflowSpeed = 150.0f,
+    };
+
+BEST VON KARMAN results, BUT LOW DENSITY REGIONS
+
+ProgramState state = {
+        .width = 1200,
+        .height = 600,
+        .particleAmount = 3300,
+        .predictionAmount = 0.005f,
+        .kernelCutoff = 50.0f,
+        .EOSCoefficient = 100000.0f,
+        .EOSExponent = 5.0f,
+        .EOSRestDensity = 1.55f,
+        .viscosityCoefficient = 400.0f,
+        .gravitationalPull = 0.0f,//100.0f,
+        .wallPushCutoff = 0.0f,
+        .wallPushStrength = 4000.0f,
+        .inflowSpeed = 150.0f,
+    };

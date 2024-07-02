@@ -104,15 +104,15 @@ float dotProduct(sf::Vector2f v1, sf::Vector2f v2);
 
 int main() {
     ProgramState state = {
-        .width = 800,
+        .width = 1200,
         .height = 600,
-        .particleAmount = 2200,
+        .particleAmount = 3300,
         .predictionAmount = 0.005f,
         .kernelCutoff = 50.0f,
-        .EOSCoefficient = 1400000.0f,
-        .EOSExponent = 1.0f,
-        .EOSRestDensity = 1.6f,
-        .viscosityCoefficient = 500.0f,
+        .EOSCoefficient = 100000.0f,
+        .EOSExponent = 5.0f,
+        .EOSRestDensity = 1.55f,
+        .viscosityCoefficient = 400.0f,
         .gravitationalPull = 0.0f,//100.0f,
         .wallPushCutoff = 0.0f,
         .wallPushStrength = 4000.0f,
@@ -122,7 +122,7 @@ int main() {
 
     initializeParticles(&state);
 
-    createSphereParticles(&state, sf::Vector2f(200, 300), 50, 0.5);
+    createSphereParticles(&state, sf::Vector2f(200, 300), 50, 0.1);
 
     initializePartition(&state);
 
@@ -144,7 +144,7 @@ int main() {
         updateParticles(&state);
         render(&state);
 
-        //std::cout << state.particles[0].density << std::endl;
+        std::cout << state.particles[0].density << std::endl;
     }
 
     ImGui::SFML::Shutdown();
@@ -216,8 +216,8 @@ void displayGui(ProgramState *state) {
 
 
 void initializePartition(ProgramState* state) {
-    state->partitionResolutionX = state->width / state->kernelCutoff + 2;
-    state->partitionResolutionY = state->height / state->kernelCutoff + 2;
+    state->partitionResolutionX = state->width / static_cast<int>(state->kernelCutoff) + 2;
+    state->partitionResolutionY = state->height / static_cast<int>(state->kernelCutoff) + 2;
 
     state->partitionSize = state->partitionResolutionX * state->partitionResolutionY;
     state->partition = new std::vector<int>[state->partitionSize];
@@ -245,7 +245,11 @@ void partitionParticles(ProgramState *state) {
     for (int i = 0; i < state->particleAmount; i++) {
         int index = getPartitionIndex(state->particles[i].predictedPosition, state);
         if (index < 0 ||index >= state->partitionSize) {
-            std::cout << state->particles[i].predictedPosition.x << "," << state->particles[i].predictedPosition.y << "\n";
+            std::cout << state->particles[i].forces.x << "," << state->particles[i].forces.y << "\n";
+
+            state->particles[i].position = sf::Vector2f(0, 0);
+            state->particles[i].predictedPosition = sf::Vector2f(0, 0);
+            state->particles[i].velocity = sf::Vector2f(0,0);
             index = 0;
         }
 
@@ -313,6 +317,7 @@ void applyBoundaryConditions(ProgramState* state) {
             state->particles[i].position.x -= state->width + state->kernelCutoff/2.0f;
             //state->particles[i].position.y = randomFloat(state->wallPushCutoff, state->height - state->wallPushCutoff);
         }
+
         if (state->particles[i].position.y > state->height) state->particles[i].position.y = state->height;
         if (state->particles[i].position.x < -state->kernelCutoff) state->particles[i].position.x = -state->kernelCutoff;
 
@@ -320,7 +325,7 @@ void applyBoundaryConditions(ProgramState* state) {
         if (state->particles[i].position.y < 0) state->particles[i].position.y = 0.0f;
 
         float sphereDist = sqrt(pow(state->particles[i].position.x - 200, 2.0) + pow(state->particles[i].position.y - 300, 2.0));
-        float error = state->particles[i].radius + 55 - sphereDist;
+        float error = state->particles[i].radius + 50 - sphereDist;
         if (error > 0) {
             state->particles[i].position += (state->particles[i].position - sf::Vector2f(200, 300)) * (error / sphereDist);
         }
@@ -379,6 +384,7 @@ void createSphereParticles(ProgramState* state, sf::Vector2f position, float rad
         sf::Vector2f relativePosition = radius * sf::Vector2f(cos(angle), sin(angle));
 
         state->particles[state->particleAmount] = Particle{
+            .mass = 1.0f,
             .position = position + relativePosition,
             .velocity = sf::Vector2f(0.0f, 0.0f),
             .predictedPosition = position + relativePosition,
@@ -527,7 +533,7 @@ void calculateViscosityForceSingle(int particleIndex, int j, Particle* particles
     sf::Vector2f viscosityForce = -particles[j].mass * viscosityCoefficient
         / (particles[particleIndex].density * particles[j].density)
         * dotProduct(particles[particleIndex].position - particles[j].position, SPHKernelGradient(particles[particleIndex].position, particles[j].position, cutoff))
-        / (distance * distance)
+        / (distance * distance + 0.0001f)
         * (particles[particleIndex].velocity - particles[j].velocity);
 
     particles[particleIndex].forces += viscosityForce;
