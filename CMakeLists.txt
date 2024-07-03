@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(MyFirstSFML LANGUAGES CXX)
+project(ArthursSPH LANGUAGES CXX)
 
 # Add ImGui files
 file(GLOB IMGUI_SRC

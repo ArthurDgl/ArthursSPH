@@ -1,0 +1,49 @@
+# Hashtag symbol is a line comment
+# to set a parameter start line with '>', example : '>pressureCoefficient = 100000'
+
+# ----------- ALL POSSIBLE PARAMETERS -----------
+
+# unsigned int width; (horizontal window resolution)
+# unsigned int height; (vertical window resolution)
+
+# int particleAmount; (amount of particles in the simulation)
+
+# float predictionAmount; (extrapolation amount to predict densities more accurately)
+
+# float kernelCutoff; (size of the kernel function)
+
+# float pressureCoefficient; (leading coefficient in the Cole Equation of State https://en.wikipedia.org/wiki/Cole_equation_of_state)
+# float pressureExponent; (adiabatic index in the Cole Equation of State)
+# float restDensity; (Rest density in the Cole Equation of State)
+
+# float viscosityCoefficient; (viscosity coefficient in the Artificial Viscosity calculation, Morris et al (1997))
+
+# float gravitationalPull; (downward constant force on every particle)
+
+# float wallPushCutoff; (distance to walls before experiencing constant force)
+# float wallPushStrength; (strength of the force pushing particles away from the walls)
+
+# float inflowSpeed; (Speed of the flow, enforced at both ends of the window)
+
+# float obstacleDensity; (density of particles in obstacles)
+# bool useCeilFloor; (use solid particles for ceiling and floor)
+
+# bool useSphere; (use a sphere obstacle)
+# float sphereX;
+# float sphereY;
+# float sphereRadius;
+
+# bool useRect; (use a axes-aligned rectangular obstacle)
+# float rectX1;
+# float rectY1;
+# float rectX2;
+# float rectY2;
+
+# bool useTri; (use a triangular obstacle)
+# bool triThirdSegment; (create the third edge of the triangle)
+# float triX1;
+# float triY1;
+# float triX2;
+# float triY2;
+# float triX3;
+# float triY3;

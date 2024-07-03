@@ -76,6 +76,7 @@ struct ProgramState {
     float rectY2;
 
     bool useTri;
+    bool triThirdSegment;
     float triX1;
     float triY1;
     float triX2;
@@ -153,6 +154,7 @@ int main() {
         .rectX2 = 280,
         .rectY2 = 610,
         .useTri = true,
+        .triThirdSegment = false,
         .triX1 = 200,
         .triY1 = 600,
         .triX2 = 353,
@@ -169,7 +171,7 @@ int main() {
     if (state.useTri) {
         createLineParticles(&state, sf::Vector2f(state.triX1, state.triY1), sf::Vector2f(state.triX2, state.triY2), state.obstacleDensity);
         createLineParticles(&state, sf::Vector2f(state.triX2, state.triY2), sf::Vector2f(state.triX3, state.triY3), state.obstacleDensity);
-        //createLineParticles(&state, sf::Vector2f(state.triX3, state.triY3), sf::Vector2f(state.triX1, state.triY1), state.obstacleDensity);
+        if (state.triThirdSegment) createLineParticles(&state, sf::Vector2f(state.triX3, state.triY3), sf::Vector2f(state.triX1, state.triY1), state.obstacleDensity);
     }
 
     if (state.useCeilFloor) {
