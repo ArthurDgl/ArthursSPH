@@ -43,9 +43,9 @@ struct ProgramState {
 
     float kernelCutoff;
 
-    float EOSCoefficient;
-    float EOSExponent;
-    float EOSRestDensity;
+    float pressureCoefficient;
+    float pressureExponent;
+    float restDensity;
 
     float viscosityCoefficient;
 
@@ -60,6 +60,28 @@ struct ProgramState {
     int partitionSize;
     int partitionResolutionX;
     int partitionResolutionY;
+
+    float obstacleDensity;
+    bool useCeilFloor;
+
+    bool useSphere;
+    float sphereX;
+    float sphereY;
+    float sphereRadius;
+
+    bool useRect;
+    float rectX1;
+    float rectY1;
+    float rectX2;
+    float rectY2;
+
+    bool useTri;
+    float triX1;
+    float triY1;
+    float triX2;
+    float triY2;
+    float triX3;
+    float triY3;
 };
 
 void render(ProgramState* state);
@@ -76,6 +98,8 @@ void integrateParticles(ProgramState* state);
 void resetParticleForces(ProgramState* state);
 
 void createSphereParticles(ProgramState* state, sf::Vector2f position, float radius, float density);
+void createLineParticles(ProgramState* state, sf::Vector2f pointA, sf::Vector2f pointB, float density);
+void createRectangleParticles(ProgramState* state, float density);
 
 void applyBoundaryConditions(ProgramState* state);
 void applyWallForces(ProgramState* state);
@@ -109,20 +133,49 @@ int main() {
         .particleAmount = 3300,
         .predictionAmount = 0.005f,
         .kernelCutoff = 50.0f,
-        .EOSCoefficient = 100000.0f,
-        .EOSExponent = 5.0f,
-        .EOSRestDensity = 1.55f,
+        .pressureCoefficient = 100000.0f,
+        .pressureExponent = 5.0f,
+        .restDensity = 1.55f,
         .viscosityCoefficient = 400.0f,
         .gravitationalPull = 0.0f,//100.0f,
-        .wallPushCutoff = 0.0f,
-        .wallPushStrength = 4000.0f,
+        .wallPushCutoff = 5.0f,
+        .wallPushStrength = 50000.0f,
         .inflowSpeed = 150.0f,
+        .obstacleDensity = 0.1f,
+        .useCeilFloor = true,
+        .useSphere = false,
+        .sphereX = 200,
+        .sphereY = 300,
+        .sphereRadius = 50,
+        .useRect = false,
+        .rectX1 = 200,
+        .rectY1 = 450,
+        .rectX2 = 280,
+        .rectY2 = 610,
+        .useTri = true,
+        .triX1 = 200,
+        .triY1 = 600,
+        .triX2 = 353,
+        .triY2 = 549,
+        .triX3 = 425,
+        .triY3 = 600,
     };
     state.particles = new Particle[state.particleAmount * 2];
 
     initializeParticles(&state);
 
-    createSphereParticles(&state, sf::Vector2f(200, 300), 50, 0.1);
+    if (state.useSphere) createSphereParticles(&state, sf::Vector2f(state.sphereX, state.sphereY), state.sphereRadius, state.obstacleDensity);
+    if (state.useRect) createRectangleParticles(&state, state.obstacleDensity);
+    if (state.useTri) {
+        createLineParticles(&state, sf::Vector2f(state.triX1, state.triY1), sf::Vector2f(state.triX2, state.triY2), state.obstacleDensity);
+        createLineParticles(&state, sf::Vector2f(state.triX2, state.triY2), sf::Vector2f(state.triX3, state.triY3), state.obstacleDensity);
+        //createLineParticles(&state, sf::Vector2f(state.triX3, state.triY3), sf::Vector2f(state.triX1, state.triY1), state.obstacleDensity);
+    }
+
+    if (state.useCeilFloor) {
+        createLineParticles(&state, sf::Vector2f(0, 0), sf::Vector2f(state.width, 0), state.obstacleDensity);
+        createLineParticles(&state, sf::Vector2f(0, state.height), sf::Vector2f(state.width, state.height), state.obstacleDensity);
+    }
 
     initializePartition(&state);
 
@@ -144,7 +197,7 @@ int main() {
         updateParticles(&state);
         render(&state);
 
-        std::cout << state.particles[0].density << std::endl;
+        // std::cout << state.particles[0].density << std::endl;
     }
 
     ImGui::SFML::Shutdown();
@@ -157,6 +210,7 @@ void render(ProgramState *state) {
     state->window->clear();
 
     sf::CircleShape circle = sf::CircleShape(state->particles->radius);
+    circle.setOrigin(state->particles->radius, state->particles->radius);
     sf::Color color = sf::Color::Black;
 
     // Render Code here
@@ -168,6 +222,17 @@ void render(ProgramState *state) {
         color.r = 255 * t;
         color.g = 255 * (1 - t);
         color.b = 0;
+
+        // if (state->particles[i].velocity.x < 0) {
+        //     color.r = 0;
+        //     color.g = 255;
+        //     color.b = 0;
+        // }
+        // else {
+        //     color.r = 255;
+        //     color.g = 0;
+        //     color.b = 0;
+        // }
 
         if (state->particles[i].solid) {
             color.r = 0;
@@ -189,27 +254,27 @@ void displayGui(ProgramState *state) {
     state->deltaTime = 0.01f;//deltaTime.asSeconds();
     ImGui::SFML::Update(*state->window, state->deltaClock->restart());
 
-    ImGui::Begin("SPH Configuration");
+    ImGui::Begin("SPH Info");
     float fps = std::round(100.0f/deltaTime.asSeconds()) / 100.0f;
     ImGui::Text((std::string("FPS : ") + std::to_string(fps)).c_str());
 
-    ImGui::NewLine();
-    ImGui::Text("Kernel");
-    ImGui::InputFloat("Cutoff Distance", &state->kernelCutoff);
-
-    ImGui::NewLine();
-    ImGui::Text("Equation of State");
-    ImGui::InputFloat("Pressure Coefficient", &state->EOSCoefficient);
-    ImGui::InputFloat("Density Exponent", &state->EOSExponent);
-    ImGui::InputFloat("Rest Density", &state->EOSRestDensity);
-
-    ImGui::NewLine();
-    ImGui::Text("Viscosity");
-    ImGui::InputFloat("Viscosity Coefficient", &state->viscosityCoefficient);
-
-    ImGui::NewLine();
-    ImGui::Text("Gravity");
-    ImGui::InputFloat("Gravitational Pull", &state->gravitationalPull);
+    // ImGui::NewLine();
+    // ImGui::Text("Kernel");
+    // ImGui::InputFloat("Cutoff Distance", &state->kernelCutoff);
+    //
+    // ImGui::NewLine();
+    // ImGui::Text("Equation of State");
+    // ImGui::InputFloat("Pressure Coefficient", &state->pressureCoefficient);
+    // ImGui::InputFloat("Density Exponent", &state->pressureExponent);
+    // ImGui::InputFloat("Rest Density", &state->restDensity);
+    //
+    // ImGui::NewLine();
+    // ImGui::Text("Viscosity");
+    // ImGui::InputFloat("Viscosity Coefficient", &state->viscosityCoefficient);
+    //
+    // ImGui::NewLine();
+    // ImGui::Text("Gravity");
+    // ImGui::InputFloat("Gravitational Pull", &state->gravitationalPull);
 
     ImGui::End();
 }
@@ -260,9 +325,35 @@ void partitionParticles(ProgramState *state) {
 
 
 void initializeParticles(ProgramState* state) {
+    // Define a no-spawn area for particles, to prevent spawning inside obstacles
+    float noX1 = 0;
+    float noY1 = 0;
+    float noX2 = 0;
+    float noY2 = 0;
+    float padding = 10;
+
+    if (state->useRect) {
+        noX1 = state->rectX1 - padding;
+        noY1 = state->rectY1 - padding;
+        noX2 = state->rectX2 + padding;
+        noY2 = state->rectY2 + padding;
+    }
+
+    if (state->useTri) {
+        noX1 = std::min(std::min(state->triX1, state->triX2), state->triX3) - padding;
+        noY1 = std::min(std::min(state->triY1, state->triY2), state->triY3) - padding;
+
+        noX2 = std::max(std::max(state->triX1, state->triX2), state->triX3) + padding;
+        noY2 = std::max(std::max(state->triY1, state->triY2), state->triY3) + padding;
+    }
+
     for (int i = 0; i < state->particleAmount; i++) {
-        float rX = randomFloat(0, 1.0f*state->width);
-        float rY = randomFloat(0, 1.0f*state->height);
+        float rX;
+        float rY;
+        do {
+            rX = randomFloat(5, 1.0f*state->width - 5);
+            rY = randomFloat(5, 1.0f*state->height - 5);
+        } while (rX > noX1 && rX < noX2 && rY > noY1 && rY < noY2);
 
         state->particles[i] = Particle{
             .mass = 1.0f,
@@ -313,21 +404,38 @@ void applyBoundaryConditions(ProgramState* state) {
     for (int i = 0; i < state->particleAmount; i++) {
         if (state->particles[i].solid) continue;
 
-        if (state->particles[i].position.x > state->width) {
-            state->particles[i].position.x -= state->width + state->kernelCutoff/2.0f;
-            //state->particles[i].position.y = randomFloat(state->wallPushCutoff, state->height - state->wallPushCutoff);
-        }
+        // Loopback and Constant Edge Velocity
+        if (state->particles[i].position.x > state->width) state->particles[i].position.x -= state->width + state->kernelCutoff/2.0f;
+        if (state->particles[i].position.x < 20 || state->particles[i].position.x > state->width - 20) state->particles[i].velocity = {state->inflowSpeed, 0.0f};
 
+        // Constraints in +-Y and -X
         if (state->particles[i].position.y > state->height) state->particles[i].position.y = state->height;
         if (state->particles[i].position.x < -state->kernelCutoff) state->particles[i].position.x = -state->kernelCutoff;
-
-        if (state->particles[i].position.x < 20 || state->particles[i].position.x > state->width - 20) state->particles[i].velocity = {state->inflowSpeed, 0.0f};
         if (state->particles[i].position.y < 0) state->particles[i].position.y = 0.0f;
 
-        float sphereDist = sqrt(pow(state->particles[i].position.x - 200, 2.0) + pow(state->particles[i].position.y - 300, 2.0));
-        float error = state->particles[i].radius + 50 - sphereDist;
-        if (error > 0) {
-            state->particles[i].position += (state->particles[i].position - sf::Vector2f(200, 300)) * (error / sphereDist);
+        // Constraint on Predicted position, to avoid out of bounds for the partition
+        if (state->particles[i].predictedPosition.x > state->width + state->kernelCutoff) state->particles[i].predictedPosition.x = state->width + state->kernelCutoff;
+        if (state->particles[i].predictedPosition.x < -state->kernelCutoff) state->particles[i].predictedPosition.x = -state->kernelCutoff;
+
+        // Constraint around spherical obstacle
+        if (state->useSphere) {
+            float sphereDist = sqrt(pow(state->particles[i].position.x - state->sphereX, 2.0) + pow(state->particles[i].position.y - state->sphereY, 2.0));
+            float error = state->particles[i].radius + state->sphereRadius - sphereDist;
+            if (error > 0) {
+                state->particles[i].position += (state->particles[i].position - sf::Vector2f(state->sphereX, state->sphereY)) * (error / sphereDist);
+            }
+        }
+        if (state->useRect) {
+            float padding = 5;
+            if (state->particles[i].position.x >= state->rectX1 - padding && state->particles[i].position.x <= state->rectX2 + padding
+                && state->particles[i].position.y >= state->rectY1 - padding && state->particles[i].position.y <= state->rectY2 + padding) {
+                if (state->particles[i].position.x - state->rectX1 > state->rectX2 - state->particles[i].position.x) {
+                    state->particles[i].position.x = state->rectX2 + padding*2;
+                }
+                else {
+                    state->particles[i].position.x = state->rectX1 - padding*2;
+                }
+            }
         }
     }
 }
@@ -337,8 +445,8 @@ void applyWallForces(ProgramState* state) {
         if (state->particles[i].solid) continue;
 
         sf::Vector2f wallForce = sf::Vector2f(0, 0);
-        if (state->particles[i].position.x < 0 + state->wallPushCutoff) wallForce.x += state->wallPushStrength;
-        if (state->particles[i].position.y < 0 + state->wallPushCutoff) wallForce.y += state->wallPushStrength;
+        //if (state->particles[i].position.x < 0 + state->wallPushCutoff) wallForce.x += state->wallPushStrength;
+        if (state->particles[i].position.y < state->wallPushCutoff) wallForce.y += state->wallPushStrength;
         //if (state->particles[i].position.x > state->width - state->wallPushCutoff) wallForce.x -= state->wallPushStrength;
         if (state->particles[i].position.y > state->height - state->wallPushCutoff) wallForce.y -= state->wallPushStrength;
 
@@ -364,6 +472,7 @@ void resetParticleForces(ProgramState* state) {
 //             sf::Vector2f relativePosition = innerRadius * sf::Vector2f(cos(angle), sin(angle));
 //
 //             state->particles[state->particleAmount] = Particle{
+//                 .mass = 1.0f,
 //                 .position = position + relativePosition,
 //                 .velocity = sf::Vector2f(0.0f, 0.0f),
 //                 .predictedPosition = position + relativePosition,
@@ -397,6 +506,37 @@ void createSphereParticles(ProgramState* state, sf::Vector2f position, float rad
 }
 
 
+void createLineParticles(ProgramState* state, sf::Vector2f pointA, sf::Vector2f pointB, float density) {
+    float distance = sqrt(pow(pointA.x - pointB.x, 2) + pow(pointA.y - pointB.y, 2));
+    float steps = distance * density;
+    for (int i = 0; i < steps; i++) {
+        float t = i / steps;
+        sf::Vector2f pos = pointA * (1 - t) + pointB * t;
+
+        state->particles[state->particleAmount] = Particle{
+            .mass = 1.0f,
+            .position = pos,
+            .velocity = sf::Vector2f(0.0f, 0.0f),
+            .predictedPosition = pos,
+            .forces = sf::Vector2f(0.0f, 0.0f),
+            .radius = 2,
+            .solid = true
+        };
+
+        state->particleAmount++;
+    }
+}
+
+
+void createRectangleParticles(ProgramState* state, float density) {
+    createLineParticles(state, sf::Vector2f(state->rectX1, state->rectY1), sf::Vector2f(state->rectX2, state->rectY1), density);
+    createLineParticles(state, sf::Vector2f(state->rectX1, state->rectY1), sf::Vector2f(state->rectX1, state->rectY2), density);
+
+    createLineParticles(state, sf::Vector2f(state->rectX2, state->rectY1), sf::Vector2f(state->rectX2, state->rectY2), density);
+    createLineParticles(state, sf::Vector2f(state->rectX1, state->rectY2), sf::Vector2f(state->rectX2, state->rectY2), density);
+}
+
+
 void computeDensities(ProgramState* state) {
     #pragma omp parallel for num_threads(32)
     for (int i = 0; i < state->particleAmount; i++) {
@@ -408,7 +548,7 @@ void computeDensities(ProgramState* state) {
 void computePressures(ProgramState *state) {
     #pragma omp parallel for num_threads(32)
     for (int i = 0; i < state->particleAmount; i++) {
-        state->particles[i].pressure = EOSPressure(state->particles[i].density, state->EOSRestDensity, state->EOSCoefficient, state->EOSExponent);
+        state->particles[i].pressure = EOSPressure(state->particles[i].density, state->restDensity, state->pressureCoefficient, state->pressureExponent);
         state->particles[i].pressureOverDSquared = state->particles[i].pressure / (state->particles[i].density * state->particles[i].density);
     }
 }

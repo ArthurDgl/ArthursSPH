@@ -53,3 +53,61 @@ ProgramState state = {
         .wallPushStrength = 4000.0f,
         .inflowSpeed = 150.0f,
     };
+
+OTHER VON KARMAN VORTICES
+
+ProgramState state = {
+        .width = 1200,
+        .height = 600,
+        .particleAmount = 3300,
+        .predictionAmount = 0.005f,
+        .kernelCutoff = 50.0f,
+        .EOSCoefficient = 100000.0f,
+        .EOSExponent = 5.0f,
+        .EOSRestDensity = 1.55f,
+        .viscosityCoefficient = 400.0f,
+        .gravitationalPull = 0.0f,//100.0f,
+        .wallPushCutoff = 20.0f,
+        .wallPushStrength = 4000.0f,
+        .inflowSpeed = 150.0f,
+        .sphereX = 200,
+        .sphereY = 300,
+        .sphereRadius = 50,
+    };
+
+
+BEST SETUP SO FAR
+
+ProgramState state = {
+        .width = 1200,
+        .height = 600,
+        .particleAmount = 3300,
+        .predictionAmount = 0.005f,
+        .kernelCutoff = 50.0f,
+        .pressureCoefficient = 100000.0f,
+        .pressureExponent = 5.0f,
+        .restDensity = 1.55f,
+        .viscosityCoefficient = 400.0f,
+        .gravitationalPull = 0.0f,//100.0f,
+        .wallPushCutoff = 5.0f,
+        .wallPushStrength = 50000.0f,
+        .inflowSpeed = 150.0f,
+        .obstacleDensity = 0.1f,
+        .useCeilFloor = true,
+        .useSphere = false,
+        .sphereX = 200,
+        .sphereY = 300,
+        .sphereRadius = 50,
+        .useRect = false,
+        .rectX1 = 200,
+        .rectY1 = 450,
+        .rectX2 = 280,
+        .rectY2 = 610,
+        .useTri = true,
+        .triX1 = 200,
+        .triY1 = 600,
+        .triX2 = 353,
+        .triY2 = 549,
+        .triX3 = 425,
+        .triY3 = 600,
+    };
