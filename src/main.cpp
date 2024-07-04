@@ -3,6 +3,7 @@
 #include <../../../../libs/imgui/imgui.h>
 #include <../../../../libs/imgui-sfml/imgui-SFML.h>
 #include <cmath>
+#include <filesystem>
 #include <random>
 #include <omp.h>
 
@@ -152,6 +153,8 @@ float randomFloat(float lowerBound, float upperBound); // From ChatGPT
 float dotProduct(sf::Vector2f v1, sf::Vector2f v2);
 
 int main() {
+    std::filesystem::create_directory("images");
+
     ProgramState state = {
         .width = 1200,
         .height = 600,
@@ -300,11 +303,11 @@ void displayGui(ProgramState *state) {
     ImGui::NewLine();
     ImGui::Text("Save Options");
     if (ImGui::Button("Save X Velocities")) {
-        std::string filename = "../../images/vx.png";
+        std::string filename = "images/vx.png";
         savePropertyToFile(state, sampleVX, state->width/5, state->height/5, &filename, state->vXMapSize, state->vXValueMap, state->vXColorMap);
     }
     if (ImGui::Button("Save Curl")) {
-        std::string filename = "../../images/curl.png";
+        std::string filename = "images/curl.png";
         savePropertyToFile(state, sampleCurl, state->width/5, state->height/5, &filename, state->curlMapSize, state->curlValueMap, state->curlColorMap);
     }
 
