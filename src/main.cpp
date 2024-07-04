@@ -875,7 +875,7 @@ float SPHKernelLaplacian(float distance, float cutoff) {
 }
 
 
-float randomFloat(float lowerBound, float upperBound) { // From ChatGPT
+float randomFloat(float lowerBound, float upperBound) { //  From ChatGPT
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_real_distribution<> dis(lowerBound, upperBound);
