@@ -83,10 +83,34 @@ struct ProgramState {
     float triY2;
     float triX3;
     float triY3;
+
+    int vXMapSize;
+    float* vXValueMap;
+    sf::Color* vXColorMap;
+
+    int curlMapSize;
+    float* curlValueMap;
+    sf::Color* curlColorMap;
+
+    float curlDeltaSize;
 };
 
 void render(ProgramState* state);
 void displayGui(ProgramState* state);
+
+float getVX(ProgramState* state, int particleIndex);
+float sampleVX(ProgramState* state, float sampleX, float sampleY);
+
+float getVY(ProgramState* state, int particleIndex);
+float sampleVY(ProgramState* state, float sampleX, float sampleY);
+
+float sampleCurl(ProgramState* state, float sampleX, float sampleY);
+
+float sampleAt(ProgramState* state, float (*getPropertyFunction)(ProgramState*, int), float sampleX, float sampleY);
+
+void computeAll(ProgramState* state, float (*sampleFunction)(ProgramState*, float, float), int resolutionX, int resolutionY, float** result);
+bool savePropertyToFile(ProgramState* state, float (*sampleFunction)(ProgramState*, float, float), int resolutionX, int resolutionY, std::string* filename, int mapSize, float* valueMap, sf::Color* colorMap);
+void interpolateColor(float value, sf::Color* color, int mapSize, float* valueMap, sf::Color* colorMap);
 
 void initializePartition(ProgramState* state);
 void clearPartition(ProgramState* state);
@@ -144,16 +168,16 @@ int main() {
         .inflowSpeed = 150.0f,
         .obstacleDensity = 0.1f,
         .useCeilFloor = true,
-        .useSphere = false,
+        .useSphere = true,
         .sphereX = 200,
         .sphereY = 300,
         .sphereRadius = 50,
         .useRect = false,
         .rectX1 = 200,
-        .rectY1 = 450,
-        .rectX2 = 280,
-        .rectY2 = 610,
-        .useTri = true,
+        .rectY1 = 549,
+        .rectX2 = 230,
+        .rectY2 = 620,
+        .useTri = false,
         .triThirdSegment = false,
         .triX1 = 200,
         .triY1 = 600,
@@ -161,7 +185,20 @@ int main() {
         .triY2 = 549,
         .triX3 = 425,
         .triY3 = 600,
+        .curlDeltaSize = 35.0f,
     };
+    state.vXMapSize = 3;
+    float v[] = {-50.0f, 0.0f, 150.0f};
+    state.vXValueMap = v;
+    sf::Color c[] = {sf::Color::Blue, sf::Color::Green, sf::Color::Red};
+    state.vXColorMap = c;
+
+    state.curlMapSize = 3;
+    float vc[] = {-3.0f, 0.0f, 3.0f};
+    state.curlValueMap = vc;
+    sf::Color cc[] = {sf::Color::Cyan, sf::Color::White, sf::Color::Magenta};
+    state.curlColorMap = cc;
+
     state.particles = new Particle[state.particleAmount * 2];
 
     initializeParticles(&state);
@@ -260,6 +297,17 @@ void displayGui(ProgramState *state) {
     float fps = std::round(100.0f/deltaTime.asSeconds()) / 100.0f;
     ImGui::Text((std::string("FPS : ") + std::to_string(fps)).c_str());
 
+    ImGui::NewLine();
+    ImGui::Text("Save Options");
+    if (ImGui::Button("Save X Velocities")) {
+        std::string filename = "../../images/vx.png";
+        savePropertyToFile(state, sampleVX, state->width/5, state->height/5, &filename, state->vXMapSize, state->vXValueMap, state->vXColorMap);
+    }
+    if (ImGui::Button("Save Curl")) {
+        std::string filename = "../../images/curl.png";
+        savePropertyToFile(state, sampleCurl, state->width/5, state->height/5, &filename, state->curlMapSize, state->curlValueMap, state->curlColorMap);
+    }
+
     // ImGui::NewLine();
     // ImGui::Text("Kernel");
     // ImGui::InputFloat("Cutoff Distance", &state->kernelCutoff);
@@ -279,6 +327,121 @@ void displayGui(ProgramState *state) {
     // ImGui::InputFloat("Gravitational Pull", &state->gravitationalPull);
 
     ImGui::End();
+}
+
+
+float getVX(ProgramState* state, int particleIndex) {
+    return state->particles[particleIndex].velocity.x;
+}
+
+float sampleVX(ProgramState* state, float sampleX, float sampleY) {
+    return sampleAt(state, getVX, sampleX, sampleY);
+}
+
+float getVY(ProgramState* state, int particleIndex) {
+    return state->particles[particleIndex].velocity.y;
+}
+
+float sampleVY(ProgramState* state, float sampleX, float sampleY) {
+    return sampleAt(state, getVY, sampleX, sampleY);
+}
+
+float sampleCurl(ProgramState* state, float sampleX, float sampleY) {
+    float delta = state->curlDeltaSize;
+
+    float dVYoverDX = (sampleVY(state, sampleX + delta, sampleY) - sampleVY(state, sampleX - delta, sampleY)) / (2.0f * delta);
+
+    float dVXoverDY = (sampleVX(state, sampleX, sampleY + delta) - sampleVX(state, sampleX, sampleY - delta)) / (2.0f * delta);
+
+    return dVYoverDX - dVXoverDY;
+}
+
+
+float sampleAt(ProgramState* state, float (*getPropertyFunction)(ProgramState*, int), float sampleX, float sampleY) {
+    int center = getPartitionIndex(sf::Vector2f(sampleX, sampleY), state);
+
+    float result = 0.0f;
+
+    for (int k = -1; k <= 1; k++) {
+        for (int l = -1; l <= 1; l++) {
+            int vectorIndex = center + k*state->partitionResolutionY + l;
+            if (vectorIndex < 0 || vectorIndex >= state->partitionSize) continue;
+
+            for (int m = 0; m < state->partition[vectorIndex].size(); m++) {
+                int i = state->partition[vectorIndex].at(m);
+
+                float distance = std::sqrt(std::pow(sampleX - state->particles[i].position.x, 2.0f) + std::pow(sampleY - state->particles[i].position.y, 2.0f));
+
+                result += getPropertyFunction(state, i) * state->particles[i].mass / state->particles[i].density * SPHKernel(distance, state->kernelCutoff);
+            }
+        }
+    }
+
+    return result;
+}
+
+
+void computeAll(ProgramState* state, float (*sampleFunction)(ProgramState*, float, float), int resolutionX, int resolutionY, float** result) {
+    float spacingX = state->width / static_cast<float>(resolutionX);
+    float spacingY = state->height / static_cast<float>(resolutionY);
+
+    for (int i = 0; i < resolutionX; i++) {
+        for (int j = 0; j < resolutionY; j++) {
+            result[i][j] = sampleFunction(state, i * spacingX, j * spacingY);
+        }
+    }
+}
+
+
+bool savePropertyToFile(ProgramState* state, float (*sampleFunction)(ProgramState*, float, float), int resolutionX, int resolutionY, std::string* filename, int mapSize, float* valueMap, sf::Color* colorMap) {
+    sf::Image image;
+    image.create(resolutionX, resolutionY);
+    sf::Color color;
+
+    float** property = new float*[resolutionX];
+    for (int i = 0; i < resolutionX; i++) {
+        property[i] = new float[resolutionY];
+    }
+    computeAll(state, sampleFunction, resolutionX, resolutionY, property);
+
+    for (int i = 0; i < resolutionX; i++) {
+        for (int j = 0; j < resolutionY; j++) {
+            interpolateColor(property[i][j], &color, mapSize, valueMap, colorMap);
+            image.setPixel(i, j, color);
+        }
+    }
+
+    bool result = image.saveToFile(*filename);
+
+    for (int i = 0; i < resolutionX; i++) {
+        delete[] property[i];
+    }
+    delete[] property;
+
+    return result;
+}
+
+
+void interpolateColor(float value, sf::Color* color, int mapSize, float* valueMap, sf::Color* colorMap) {
+    if (value <= valueMap[0]) {
+        *color = colorMap[0];
+        return;
+    }
+
+    if (value >= valueMap[mapSize - 1]) {
+        *color = colorMap[mapSize - 1];
+        return;
+    }
+
+    for (int i = 0; i < mapSize - 1; ++i) {
+        if (value >= valueMap[i] && value <= valueMap[i + 1]) {
+            float interFactor = (value - valueMap[i]) / (valueMap[i + 1] - valueMap[i]);
+            color->r = static_cast<sf::Uint8>((1 - interFactor) * colorMap[i].r + interFactor * colorMap[i + 1].r);
+            color->g = static_cast<sf::Uint8>((1 - interFactor) * colorMap[i].g + interFactor * colorMap[i + 1].g);
+            color->b = static_cast<sf::Uint8>((1 - interFactor) * colorMap[i].b + interFactor * colorMap[i + 1].b);
+            return;
+        }
+    }
 }
 
 
@@ -312,7 +475,7 @@ void partitionParticles(ProgramState *state) {
     for (int i = 0; i < state->particleAmount; i++) {
         int index = getPartitionIndex(state->particles[i].predictedPosition, state);
         if (index < 0 ||index >= state->partitionSize) {
-            std::cout << state->particles[i].forces.x << "," << state->particles[i].forces.y << "\n";
+            //std::cout << state->particles[i].forces.x << "," << state->particles[i].forces.y << "\n";
 
             state->particles[i].position = sf::Vector2f(0, 0);
             state->particles[i].predictedPosition = sf::Vector2f(0, 0);
