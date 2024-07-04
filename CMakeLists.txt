@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.16)
 project(ArthursSPH LANGUAGES CXX)
 
+# Set C++ standard to C++20
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
 # Add ImGui files
 file(GLOB IMGUI_SRC
         "libs/imgui/*.cpp"
